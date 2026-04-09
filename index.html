@@ -15,509 +15,474 @@
 const { useState } = React;
 
 const TIPOS_BIENES = [
-  { code: "01", label: "01 - GASTOS DE PERSONAL" },
-  { code: "02", label: "02 - GASTOS POR TRABAJOS, SUMINISTROS Y SERVICIOS" },
-  { code: "03", label: "03 - ARRENDAMIENTOS" },
-  { code: "04", label: "04 - GASTOS DE ACTIVOS FIJOS" },
-  { code: "05", label: "05 - GASTOS DE REPRESENTACIÓN" },
-  { code: "06", label: "06 - OTRAS DEDUCCIONES ADMITIDAS" },
-  { code: "07", label: "07 - GASTOS FINANCIEROS" },
-  { code: "08", label: "08 - GASTOS EXTRAORDINARIOS" },
-  { code: "09", label: "09 - COMPRAS Y GASTOS QUE FORMAN PARTE DEL COSTO DE VENTA" },
-  { code: "10", label: "10 - ADQUISICIONES DE ACTIVOS" },
-  { code: "11", label: "11 - GASTOS DE SEGUROS" },
+  { code:"01", label:"01 - GASTOS DE PERSONAL" },
+  { code:"02", label:"02 - GASTOS POR TRABAJOS, SUMINISTROS Y SERVICIOS" },
+  { code:"03", label:"03 - ARRENDAMIENTOS" },
+  { code:"04", label:"04 - GASTOS DE ACTIVOS FIJOS" },
+  { code:"05", label:"05 - GASTOS DE REPRESENTACIÓN" },
+  { code:"06", label:"06 - OTRAS DEDUCCIONES ADMITIDAS" },
+  { code:"07", label:"07 - GASTOS FINANCIEROS" },
+  { code:"08", label:"08 - GASTOS EXTRAORDINARIOS" },
+  { code:"09", label:"09 - COMPRAS Y GASTOS QUE FORMAN PARTE DEL COSTO DE VENTA" },
+  { code:"10", label:"10 - ADQUISICIONES DE ACTIVOS" },
+  { code:"11", label:"11 - GASTOS DE SEGUROS" },
 ];
 
 const FORMAS_PAGO = [
-  { code: "01", label: "01 - EFECTIVO" },
-  { code: "02", label: "02 - CHEQUES / TRANSFERENCIAS / DEPÓSITO" },
-  { code: "03", label: "03 - TARJETA CRÉDITO / DÉBITO" },
-  { code: "04", label: "04 - COMPRA A CRÉDITO" },
-  { code: "05", label: "05 - PERMUTA" },
-  { code: "06", label: "06 - NOTAS DE CRÉDITO" },
-  { code: "07", label: "07 - MIXTO" },
+  { code:"01", label:"01 - EFECTIVO" },
+  { code:"02", label:"02 - CHEQUES / TRANSFERENCIAS / DEPÓSITO" },
+  { code:"03", label:"03 - TARJETA CRÉDITO / DÉBITO" },
+  { code:"04", label:"04 - COMPRA A CRÉDITO" },
+  { code:"05", label:"05 - PERMUTA" },
+  { code:"06", label:"06 - NOTAS DE CRÉDITO" },
+  { code:"07", label:"07 - MIXTO" },
 ];
 
-const norm = (v) => (v == null ? "" : String(v).trim());
+// ── Utilidades ──────────────────────────────────────────────────
+const norm = (v) => (v == null ? "" : String(v).replace(/^'+|'+$/g,"").trim());
 
-const fmtNum = (v) => {
-  if (v == null || v === "") return "0.00";
-  const n = parseFloat(String(v).replace(/[^0-9.-]/g, ""));
+const num = (v) => {
+  const n = parseFloat(norm(v).replace(/[^0-9.-]/g,""));
   return isNaN(n) ? "0.00" : n.toFixed(2);
 };
 
-// Extraer código de 2 dígitos de un valor tipo "02" o "02 - GASTOS..."
-const extractCode = (v) => {
-  if (!v) return "";
-  const m = String(v).match(/^(\d{1,2})/);
-  return m ? m[1].padStart(2, "0") : "";
+// "202603.0" → "202603"
+const normM = (v) => norm(v).split(".")[0].replace(/\D/g,"").substring(0,6);
+
+// "5.0" o "05" o 5 → "05"
+const normD = (v) => {
+  const s = norm(v).split(".")[0].replace(/\D/g,"");
+  return s ? s.padStart(2,"0") : "";
 };
 
-// Buscar fila de encabezado buscando keywords
-const findHeaderRow = (rows, keywords, max = 20) => {
-  for (let i = 0; i < Math.min(rows.length, max); i++) {
-    const row = rows[i];
-    if (!row) continue;
-    const hits = row.filter(c =>
-      c && keywords.some(k => String(c).toUpperCase().includes(k.toUpperCase()))
-    );
-    if (hits.length >= 2) return i;
-  }
-  // fallback: al menos 1 match
-  for (let i = 0; i < Math.min(rows.length, max); i++) {
-    const row = rows[i];
-    if (!row) continue;
-    if (row.some(c => c && keywords.some(k => String(c).toUpperCase().includes(k.toUpperCase())))) {
-      return i;
-    }
-  }
-  return -1;
+// "02-GASTOS..." o 2 o "2" o "02" → "02"
+const normTipo = (v) => {
+  const m = norm(v).match(/^(\d{1,2})/);
+  return m ? m[1].padStart(2,"0") : "02";
 };
 
-const findCol = (header, keys) =>
-  header.findIndex(c => c && keys.some(k => String(c).toUpperCase().includes(k.toUpperCase())));
+// "03 - TARJETA..." o 3 o "03" → "03"
+const normFP = (v) => {
+  const m = norm(v).match(/^(\d{1,2})/);
+  return m ? m[1].padStart(2,"0") : "02";
+};
 
-const resolverFechaPago = (fechaM, fechaD, fpCode) => {
-  if (!fechaM || !fechaD) return { pagM: "", pagD: "" };
-  const code = String(fpCode).padStart(2, "0");
-  if (["01", "02", "03"].includes(code)) {
-    return {
-      pagM: String(fechaM).split(".")[0],
-      pagD: String(fechaD).split(".")[0].padStart(2, "0"),
-    };
-  }
+const calcPago = (fechaM, fechaD, fpCode) => {
+  const code = normFP(fpCode);
+  if (!fechaM || fechaM.length < 6) return { pagM:"", pagD:"" };
+  if (["01","02","03"].includes(code)) return { pagM:fechaM, pagD:fechaD };
   if (code === "04") {
     try {
-      const s = String(fechaM).split(".")[0];
-      const y = parseInt(s.substring(0, 4));
-      const mo = parseInt(s.substring(4, 6)) - 1;
-      const d = parseInt(fechaD);
-      const date = new Date(y, mo, d);
-      date.setDate(date.getDate() + 30);
-      return {
-        pagM: `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`,
-        pagD: String(date.getDate()).padStart(2, "0"),
-      };
-    } catch { return { pagM: "", pagD: "" }; }
+      const y = parseInt(fechaM.substring(0,4));
+      const mo = parseInt(fechaM.substring(4,6))-1;
+      const d = parseInt(fechaD)||1;
+      const dt = new Date(y,mo,d);
+      dt.setDate(dt.getDate()+30);
+      return { pagM:`${dt.getFullYear()}${String(dt.getMonth()+1).padStart(2,"0")}`, pagD:String(dt.getDate()).padStart(2,"0") };
+    } catch { return { pagM:"", pagD:"" }; }
   }
-  return { pagM: "", pagD: "" };
+  return { pagM:fechaM, pagD:fechaD };
 };
 
+// ── Parser DGII ─────────────────────────────────────────────────
+// Hoja: "Herramienta Formato 606"
+// Fila 3 col 2 = RNC empresa | Fila 4 col 2 = Periodo
+// Header: fila 10 | Datos: desde fila 11
+// Cols: 1=RNC,2=TipoId,3=TipoBien,4=NCF,5=NCFMod,
+//       6=FechaCompM,7=FechaCompD,8=FechaPagoM,9=FechaPagoD,
+//       10=MontoSvc,11=MontoBien,12=Total,13=ITBIS,14=ITBISRet,
+//       15=ITBISProp,16=ITBISCosto,17=ITBISAdel,18=ITBISPerc,
+//       19=TipoISR,20=MontoRet,21=ISRPerc,22=ISC,23=Otros,24=Propina,25=FP
+const parseDGII = (buf) => {
+  const wb = XLSX.read(buf, { type:"array" });
+  const shName = wb.SheetNames.find(n => n.includes("606") || n.toLowerCase().includes("herramienta")) || wb.SheetNames[0];
+  const ws = wb.Sheets[shName];
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+
+  let rncEmp = "", periodo = "";
+  // Fila 3: RNC en col 2
+  if (rows[3]) rncEmp = norm(rows[3][2]).replace(/\D/g,"");
+  // Fila 4: Periodo en col 2
+  if (rows[4]) periodo = normM(rows[4][2]);
+
+  const records = [];
+  for (let i = 11; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const ncf = norm(r[4]);
+    if (ncf.length < 9) continue;
+
+    const fechaM = normM(r[6]);
+    const fechaD = normD(r[7]);
+    const fpCode = normFP(r[25]);
+    let pagM = normM(r[8]);
+    let pagD = normD(r[9]);
+    if (!pagM) { const c = calcPago(fechaM,fechaD,fpCode); pagM=c.pagM; pagD=c.pagD; }
+
+    records.push({
+      source:"DGII",
+      rnc:norm(r[1]).replace(/\D/g,""), tipoId:norm(r[2])||"1",
+      tipo:normTipo(r[3]), ncf, ncfMod:norm(r[5]),
+      fechaM, fechaD, pagM, pagD,
+      montoSvc:num(r[10]), montoBien:num(r[11]), total:num(r[12]),
+      itbis:num(r[13]), itbisRet:num(r[14]), itbisProp:num(r[15]),
+      itbisCosto:num(r[16]), itbisAdel:num(r[17]), itbisPerc:num(r[18]),
+      tipoISR:norm(r[19]), montoRet:num(r[20]), isrPerc:num(r[21]),
+      isc:num(r[22]), otros:num(r[23]), propina:num(r[24]),
+      fpCode, _fechaM:fechaM, _fechaD:fechaD,
+    });
+  }
+  return { records, rncEmp, periodo };
+};
+
+// ── Parser Alegra ───────────────────────────────────────────────
+// Hoja activa (Sheet1)
+// Fila 3 (idx 2) col B = RNC | Fila 4 (idx 3) col B = Periodo
+// Header: fila 8 (idx 7) | Datos: desde idx 8
+// Cols: 0=Línea,1=RNC,2=TipoId,3=TipoBien,4=NCF,5=NCFMod,
+//       6=FechaCompM,7=FechaCompD,8=FechaPagoM,9=FechaPagoD,
+//       10=MontoSvc,11=MontoBien,12=Total,13=ITBIS,14=ITBISRet,
+//       15=ITBISProp,16=ITBISCosto,17=ITBISAdel,18=ITBISPerc,
+//       19=TipoISR,20=MontoRet,21=ISRPerc,22=ISC,23=Otros,24=Propina,25=FP
+const parseAlegra = (buf) => {
+  const wb = XLSX.read(buf, { type:"array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+
+  let rncEmp = "", periodo = "";
+  for (let i = 0; i < Math.min(8, rows.length); i++) {
+    const r = rows[i] || [];
+    const r0 = norm(r[0]).toLowerCase();
+    if (r0.includes("rnc") && r[1]) rncEmp = norm(r[1]).replace(/\D/g,"");
+    if ((r0.includes("período")||r0.includes("periodo")) && r[1]) periodo = normM(r[1]);
+  }
+
+  const records = [];
+  for (let i = 8; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const ncf = norm(r[4]);
+    if (ncf.length < 9) continue;
+
+    const fechaM = normM(r[6]);
+    const fechaD = normD(r[7]);
+    const fpCode = normFP(r[25]);
+    let pagM = normM(r[8]);
+    let pagD = normD(r[9]);
+    if (!pagM) { const c = calcPago(fechaM,fechaD,fpCode); pagM=c.pagM; pagD=c.pagD; }
+
+    records.push({
+      source:"Alegra",
+      rnc:norm(r[1]).replace(/\D/g,""), tipoId:norm(r[2])||"1",
+      tipo:normTipo(r[3]), ncf, ncfMod:norm(r[5]),
+      fechaM, fechaD, pagM, pagD,
+      montoSvc:num(r[10]), montoBien:num(r[11]), total:num(r[12]),
+      itbis:num(r[13]), itbisRet:num(r[14]), itbisProp:num(r[15]),
+      itbisCosto:num(r[16]), itbisAdel:num(r[17]), itbisPerc:num(r[18]),
+      tipoISR:norm(r[19]), montoRet:num(r[20]), isrPerc:num(r[21]),
+      isc:num(r[22]), otros:num(r[23]), propina:num(r[24]),
+      fpCode, _fechaM:fechaM, _fechaD:fechaD,
+    });
+  }
+  return { records, rncEmp, periodo };
+};
+
+// ── App ─────────────────────────────────────────────────────────
 function App() {
-  const [dgiiMap, setDgiiMap]     = useState({});
-  const [dgiiLoaded, setDgiiLoaded] = useState(false);
-  const [dgiiCount, setDgiiCount] = useState(0);
-  const [editRows, setEditRows]   = useState([]);
-  const [rnc, setRnc]             = useState("");
-  const [periodo, setPeriodo]     = useState("");
-  const [step, setStep]           = useState(0);
-  const [globalTipo, setGlobalTipo] = useState("");
+  const [dgiiRec,   setDgiiRec]   = useState(null);
+  const [alegraRec, setAlegraRec] = useState(null);
+  const [rncEmp,    setRncEmp]    = useState("");
+  const [periodo,   setPeriodo]   = useState("");
+  const [editRows,  setEditRows]  = useState([]);
+  const [step,      setStep]      = useState(0);
+  const [globalTipo,setGlobalTipo]= useState("");
+  const [filter,    setFilter]    = useState("all");
 
-  /* ── LEER DGII ───────────────────────────────────────────────── */
   const handleDGII = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const f = e.target.files[0]; if (!f) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = (ev) => {
       try {
-        const wb = XLSX.read(evt.target.result, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-
-        // Intentar extraer RNC y Período de las primeras filas
-        rows.slice(0, 10).forEach(row => {
-          if (!row) return;
-          const flat = row.map(c => norm(c).toUpperCase()).join(" ");
-          if (flat.includes("RNC") && !rnc) {
-            const idx = row.findIndex(c => norm(c).toUpperCase().includes("RNC"));
-            if (idx >= 0 && row[idx + 1]) setRnc(norm(row[idx + 1]));
-          }
-          if ((flat.includes("PERÍODO") || flat.includes("PERIODO")) && !periodo) {
-            const idx = row.findIndex(c => {
-              const s = norm(c).toUpperCase();
-              return s.includes("PERÍODO") || s.includes("PERIODO");
-            });
-            if (idx >= 0 && row[idx + 1]) setPeriodo(norm(row[idx + 1]).split(".")[0]);
-          }
-        });
-
-        const HDR = ["NCF", "COMPROBANTE", "RNC", "CEDULA", "CÉDULA", "TIPO", "FORMA", "FISCAL"];
-        let hdrIdx = findHeaderRow(rows, HDR);
-        if (hdrIdx === -1) {
-          const preview = (rows[0] || []).slice(0, 6).map(c => norm(c)).join(" | ");
-          alert(`No se pudo detectar el encabezado del archivo DGII.\nPrimeras celdas: ${preview}`);
-          return;
-        }
-
-        const h = rows[hdrIdx];
-        const C = {
-          rnc:   findCol(h, ["RNC", "CEDULA", "CÉDULA", "PROVEEDOR"]),
-          ncf:   findCol(h, ["NCF", "COMPROBANTE FISCAL", "NÚMERO COMPROBANTE", "NUMERO COMPROBANTE"]),
-          ncfMod:findCol(h, ["MODIFICADO", "NCF MOD", "DOC MOD"]),
-          tipo:  findCol(h, ["TIPO DE BIEN", "TIPO BIEN", "BIENES Y SERVICIOS", "TIPO"]),
-          fechaM:findCol(h, ["AAAAMM"]),
-          fechaD:findCol(h, ["(DD)", " DD", "FECHA DD"]),
-          formaPago: findCol(h, ["FORMA DE PAGO", "FORMA PAGO"]),
-        };
-
-        const map = {};
-        rows.slice(hdrIdx + 1).forEach(row => {
-          if (!row) return;
-          const ncf = norm(row[C.ncf]);
-          if (ncf.length < 9) return;
-          const tipoRaw = C.tipo >= 0 ? norm(row[C.tipo]) : "";
-          const fpRaw   = C.formaPago >= 0 ? norm(row[C.formaPago]) : "";
-          map[ncf] = {
-            rnc:    C.rnc >= 0 ? norm(row[C.rnc]) : "",
-            ncf,
-            ncfMod: C.ncfMod >= 0 ? norm(row[C.ncfMod]) : "",
-            tipo:   extractCode(tipoRaw) || "02",
-            fechaM: C.fechaM >= 0 ? norm(row[C.fechaM]) : "",
-            fechaD: C.fechaD >= 0 ? norm(row[C.fechaD]) : "",
-            fpCode: extractCode(fpRaw) || "02",
-          };
-        });
-
-        setDgiiMap(map);
-        setDgiiLoaded(true);
-        setDgiiCount(Object.keys(map).length);
-        alert(`✅ DGII cargado: ${Object.keys(map).length} registros`);
-      } catch (err) {
-        alert("Error leyendo DGII: " + err.message);
-      }
+        const { records, rncEmp, periodo } = parseDGII(ev.target.result);
+        setDgiiRec(records);
+        if (rncEmp)  setRncEmp(rncEmp);
+        if (periodo) setPeriodo(periodo);
+        alert(`✅ DGII cargado: ${records.length} registros`);
+      } catch(err) { alert("Error DGII: " + err.message); }
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsArrayBuffer(f);
   };
 
-  /* ── LEER ALEGRA + MERGE ─────────────────────────────────────── */
   const handleAlegra = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const f = e.target.files[0]; if (!f) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = (ev) => {
       try {
-        const wb = XLSX.read(evt.target.result, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-
-        // Extraer RNC y Período si no están cargados
-        rows.slice(0, 10).forEach(row => {
-          if (!row) return;
-          const r0 = norm(row[0]).toLowerCase();
-          if (r0.includes("rnc") && !rnc && row[1]) setRnc(norm(row[1]));
-          if ((r0.includes("período") || r0.includes("periodo")) && !periodo && row[1])
-            setPeriodo(norm(row[1]).split(".")[0]);
-        });
-
-        // Localizar encabezado
-        const HDR = ["NCF", "RNC", "MONTO", "FORMA", "AAAAMM", "ITBIS"];
-        let hIdx = findHeaderRow(rows, HDR);
-        if (hIdx === -1) hIdx = 7; // fallback Alegra clásico
-
-        const h = rows[hIdx] || [];
-        const fc = (keys) => findCol(h, keys);
-
-        const C = {
-          rnc:  fc(["RNC/CEDULA", "RNC/CÉ", "RNC", "CEDULA"]),
-          ncf:  fc(["NCF"]),
-          fm:   fc(["AAAAMM"]),
-          fd:   fc(["COMPROBANTE (D)", "(D)"]),
-          tot:  fc(["TOTAL MONTO", "TOTAL"]),
-          fp:   fc(["FORMA DE PAGO", "FORMA PAGO"]),
-          itc:  fc(["AL COSTO", "COSTO"]),
-          ita:  fc(["ADELANTAR", "ADELANTO"]),
-          svc:  fc(["SERVICIOS"]),
-          bien: fc(["BIENES"]),
-        };
-
-        const merged = [];
-        rows.slice(hIdx + 1).forEach(row => {
-          if (!row) return;
-          const ncf = norm(row[C.ncf]);
-          if (!ncf) return;
-
-          // Tomar datos del DGII si están disponibles (por NCF)
-          const dgii = dgiiMap[ncf] || {};
-
-          const fechaM = norm(row[C.fm]) || dgii.fechaM || "";
-          const fechaD = norm(row[C.fd]) || dgii.fechaD || "";
-
-          // Forma de pago: viene de Alegra, si no del DGII
-          const fpRaw = norm(row[C.fp]);
-          const fpCode = extractCode(fpRaw) || dgii.fpCode || "02";
-
-          // Tipo Bien: viene del DGII por NCF; si no existe, default 02
-          const tipo = dgii.tipo || "02";
-
-          const { pagM, pagD } = resolverFechaPago(fechaM, fechaD, fpCode);
-
-          const itbisC = parseFloat(fmtNum(row[C.itc]));
-          const itbisA = parseFloat(fmtNum(row[C.ita]));
-          const itbis  = (itbisC + itbisA).toFixed(2);
-
-          merged.push({
-            rnc:      norm(row[C.rnc]) || dgii.rnc || "",
-            ncf,
-            ncfMod:   dgii.ncfMod || "",
-            tipo,
-            fechaM,
-            fechaD,
-            montoSvc: fmtNum(row[C.svc]),
-            montoBien:fmtNum(row[C.bien]),
-            total:    fmtNum(row[C.tot]),
-            itbis,
-            fpCode,
-            pagM,
-            pagD,
-            // guardar fecha original para recalcular al cambiar forma pago
-            _fechaM: fechaM,
-            _fechaD: fechaD,
-          });
-        });
-
-        setEditRows(merged);
-        setStep(1);
-      } catch (err) {
-        alert("Error leyendo Alegra: " + err.message);
-      }
+        const { records, rncEmp, periodo: p } = parseAlegra(ev.target.result);
+        setAlegraRec(records);
+        if (rncEmp && !rncEmp) setRncEmp(rncEmp);
+        if (p && !periodo)     setPeriodo(p);
+        if (rncEmp) setRncEmp(prev => prev || rncEmp);
+        if (p)      setPeriodo(prev => prev || p);
+        alert(`✅ Alegra cargado: ${records.length} registros`);
+      } catch(err) { alert("Error Alegra: " + err.message); }
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsArrayBuffer(f);
   };
 
-  /* ── EDICIÓN DE FILAS ────────────────────────────────────────── */
-  const updateRow = (i, field, value) => {
-    const updated = [...editRows];
-    updated[i] = { ...updated[i], [field]: value };
-    // Recalcular fecha de pago si cambia la forma de pago
+  const doMerge = () => {
+    if (!dgiiRec && !alegraRec) { alert("Carga al menos un archivo."); return; }
+    const combined = [...(dgiiRec||[]), ...(alegraRec||[])].map(r => {
+      const row = { ...r };
+      // Facturas a crédito (04): siempre calcular fecha pago = +30 días
+      if (row.fpCode === "04") {
+        const { pagM, pagD } = calcPago(row.fechaM, row.fechaD, "04");
+        row.pagM = pagM;
+        row.pagD = pagD;
+      }
+      return row;
+    });
+
+    // Ordenar por fecha comprobante (AAAAMM + DD)
+    combined.sort((a, b) => {
+      const fa = (a.fechaM || "000000") + (a.fechaD || "00");
+      const fb = (b.fechaM || "000000") + (b.fechaD || "00");
+      return fa.localeCompare(fb);
+    });
+
+    setEditRows(combined);
+    setStep(1);
+  };
+
+  const updateRow = (i, field, val) => {
+    const up = [...editRows];
+    up[i] = { ...up[i], [field]:val };
     if (field === "fpCode") {
-      const { pagM, pagD } = resolverFechaPago(updated[i]._fechaM, updated[i]._fechaD, value);
-      updated[i].pagM = pagM;
-      updated[i].pagD = pagD;
+      // Recalcular fecha pago según nueva forma
+      const { pagM, pagD } = calcPago(up[i]._fechaM, up[i]._fechaD, val);
+      up[i].pagM = pagM;
+      up[i].pagD = pagD;
     }
-    setEditRows(updated);
+    setEditRows(up);
   };
 
   const applyGlobalTipo = () => {
     if (!globalTipo) return;
-    setEditRows(prev => prev.map(r => ({ ...r, tipo: globalTipo })));
+    setEditRows(prev => prev.map(r => ({...r, tipo:globalTipo})));
   };
 
-  /* ── GENERAR EXCEL 606 ───────────────────────────────────────── */
   const generarExcel = () => {
     const headers = [
-      "RNC o Cédula del Proveedor",
-      "Número Comprobante Fiscal",
-      "NCF o Doc. Modificado",
-      "Tipo de Bienes y Servicios Adquiridos",
-      "Fecha Comprobante (AAAAMM)",
-      "Fecha Comprobante (DD)",
-      "Monto Facturado Servicios",
-      "Monto Facturado Bienes",
-      "Total Monto Facturado",
-      "Monto ITBIS Facturado",
-      "ITBIS Retenido por Terceros",
-      "ITBIS Percibido",
-      "Tipo Retención ISR",
-      "Monto Retención Renta",
-      "ISR Percibido",
-      "Impuesto Selectivo al Consumo",
-      "Otros Impuestos/Tasas",
-      "Monto Propina Legal",
+      "Número Línea","RNC o Cédula del Proveedor","Tipo de Identificación",
+      "Tipo de Bienes y Servicios Adquiridos","Número Comprobante Fiscal",
+      "NCF ó Documento Modificado","Fecha Comprobante (AAAAMM)","Fecha Comprobante (DD)",
+      "Fecha de Pago (AAAAMM)","Fecha de Pago (DD)",
+      "Monto Facturado en Servicios","Monto Facturado en Bienes","Total Monto Facturado",
+      "ITBIS Facturado","ITBIS Retenido","ITBIS sujeto a Proporcionalidad",
+      "ITBIS llevado al Costo","ITBIS por Adelantar","ITBIS Percibido en Compras",
+      "Tipo de Retención en ISR","Monto Retención Renta","ISR Percibido en Compras",
+      "Impuesto Selectivo al Consumo","Otros Impuesto/Tasas","Monto Propina Legal",
       "Forma de Pago",
-      "Fecha de Pago (AAAAMM)",
-      "Fecha de Pago (DD)",
     ];
-
-    const dataRows = editRows.map(r => [
-      r.rnc,
-      r.ncf,
-      r.ncfMod || "",
-      r.tipo,
-      r.fechaM,
-      r.fechaD,
-      r.montoSvc  || "0.00",
-      r.montoBien || "0.00",
-      r.total,
-      r.itbis,
-      "0.00", // ITBIS retenido
-      "0.00", // ITBIS percibido
-      "",     // Tipo retención ISR
-      "0.00", // Monto retención renta
-      "0.00", // ISR percibido
-      "0.00", // Imp. Selectivo
-      "0.00", // Otros impuestos
-      "0.00", // Propina
+    const data = editRows.map((r,i) => [
+      i+1, r.rnc, r.tipoId||"1", r.tipo, r.ncf, r.ncfMod||"",
+      r.fechaM, r.fechaD, r.pagM||"", r.pagD||"",
+      r.montoSvc, r.montoBien, r.total, r.itbis, r.itbisRet,
+      r.itbisProp, r.itbisCosto, r.itbisAdel, r.itbisPerc,
+      r.tipoISR||"", r.montoRet, r.isrPerc, r.isc, r.otros, r.propina,
       r.fpCode,
-      r.pagM || "",
-      r.pagD || "",
     ]);
-
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
-
+    const ws = XLSX.utils.aoa_to_sheet([headers,...data]);
     ws["!cols"] = [
-      { wch: 14 }, { wch: 22 }, { wch: 22 }, { wch: 6 },
-      { wch: 10 }, { wch: 6 },  { wch: 16 }, { wch: 16 },
-      { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 14 },
-      { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 18 },
-      { wch: 16 }, { wch: 14 }, { wch: 6 },  { wch: 10 }, { wch: 8 },
+      {wch:7},{wch:14},{wch:5},{wch:6},{wch:20},{wch:20},
+      {wch:10},{wch:5},{wch:10},{wch:5},
+      {wch:14},{wch:14},{wch:16},{wch:14},{wch:12},{wch:16},
+      {wch:14},{wch:14},{wch:16},{wch:12},{wch:14},{wch:14},
+      {wch:16},{wch:14},{wch:14},{wch:5},
     ];
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "606");
-    XLSX.writeFile(wb, `606_${periodo || "PERIODO"}_${rnc || "RNC"}.xlsx`);
+    XLSX.writeFile(wb, `606_${periodo||"PERIODO"}_${rncEmp||"RNC"}.xlsx`);
   };
 
-  /* ── ESTILOS ─────────────────────────────────────────────────── */
-  const cardStyle   = { background: "#161b22", padding: "36px", borderRadius: "20px", border: "1px solid #30363d", textAlign: "center" };
-  const selectStyle = { background: "#0d1117", color: "#c9d1d9", border: "1px solid #30363d", borderRadius: "6px", padding: "4px 8px", fontSize: "0.74rem", maxWidth: "160px" };
-  const badgeStyle  = { fontSize: "0.72rem", fontWeight: "bold", color: "#58a6ff", background: "#1c2d40", padding: "4px 10px", borderRadius: "20px" };
+  // Estilos
+  const S = {
+    card: {background:"#161b22",padding:"30px",borderRadius:"16px",border:"1px solid #30363d",textAlign:"center"},
+    sel:  {background:"#0d1117",color:"#c9d1d9",border:"1px solid #30363d",borderRadius:"6px",padding:"3px 6px",fontSize:"0.72rem"},
+    badge:(color,bg)=>({fontSize:"0.70rem",fontWeight:"bold",color,background:bg,padding:"3px 9px",borderRadius:"20px"}),
+    btn:  (bg)=>({background:bg,color:"white",border:"none",padding:"8px 18px",borderRadius:"8px",cursor:"pointer",fontWeight:"bold",fontSize:"0.80rem"}),
+  };
 
-  /* ── RENDER ──────────────────────────────────────────────────── */
+  const vis = filter==="all" ? editRows : editRows.filter(r=>r.source.toLowerCase()===filter);
+  const nDGII   = editRows.filter(r=>r.source==="DGII").length;
+  const nAlegra = editRows.filter(r=>r.source==="Alegra").length;
+
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#0d1117", color: "#c9d1d9", padding: "40px", fontFamily: "sans-serif" }}>
-      <header style={{ textAlign: "center", marginBottom: "40px" }}>
-        <h1 style={{ color: "white", fontSize: "2.2rem", marginBottom: "8px" }}>606 MERGER PRO 🚛</h1>
-        <p style={{ opacity: 0.6, margin: 0 }}>Transporte Amalfi — Unificador de Reportes</p>
+    <div style={{minHeight:"100vh",backgroundColor:"#0d1117",color:"#c9d1d9",padding:"34px",fontFamily:"sans-serif"}}>
+      <header style={{textAlign:"center",marginBottom:"32px"}}>
+        <h1 style={{color:"white",fontSize:"1.9rem",margin:"0 0 5px 0"}}>606 MERGER PRO 🚛</h1>
+        <p style={{opacity:0.45,margin:0,fontSize:"0.83rem"}}>Transporte Amalfi — Unificador de Reportes</p>
       </header>
 
-      {step === 0 ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", maxWidth: "860px", margin: "0 auto" }}>
-          {/* Card DGII */}
-          <div style={cardStyle}>
-            <div style={{ fontSize: "2.5rem", marginBottom: "16px" }}>📊</div>
-            <h2 style={{ color: "white", marginBottom: "8px" }}>1. DGII (.xls)</h2>
-            <p style={{ fontSize: "0.78rem", opacity: 0.6, marginBottom: "6px" }}>Archivo previo 606 de la DGII.</p>
-            <p style={{ fontSize: "0.72rem", color: "#f0883e", marginBottom: "16px" }}>
-              Aporta el <strong>Tipo de Bien</strong> y <strong>Forma de Pago</strong> por NCF
-            </p>
-            <input type="file" accept=".xls,.xlsx" onChange={handleDGII} style={{ fontSize: "0.78rem", color: "#c9d1d9" }} />
-            {dgiiLoaded && (
-              <span style={{ color: "#3fb950", fontSize: "0.75rem", marginTop: "10px", display: "block" }}>
-                ✅ {dgiiCount} registros cargados
-              </span>
-            )}
-            {!dgiiLoaded && (
-              <span style={{ color: "#8b949e", fontSize: "0.72rem", marginTop: "10px", display: "block" }}>
-                Opcional — si no se carga, Tipo de Bien usará código 02
-              </span>
-            )}
+      {/* PASO 0 */}
+      {step===0 && (
+        <div style={{maxWidth:"820px",margin:"0 auto"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px",marginBottom:"20px"}}>
+
+            <div style={S.card}>
+              <div style={{fontSize:"2rem",marginBottom:"10px"}}>📊</div>
+              <h2 style={{color:"white",margin:"0 0 6px 0",fontSize:"1.15rem"}}>1. DGII (.xls)</h2>
+              <p style={{fontSize:"0.74rem",opacity:0.5,margin:"0 0 3px 0"}}>Herramienta Formato 606 de la DGII</p>
+              <p style={{fontSize:"0.69rem",color:"#f0883e",margin:"0 0 14px 0"}}>
+                Lee la hoja "Herramienta Formato 606"
+              </p>
+              <input type="file" accept=".xls,.xlsx" onChange={handleDGII}
+                style={{fontSize:"0.74rem",color:"#c9d1d9"}} />
+              {dgiiRec && (
+                <div style={{marginTop:"9px",color:"#3fb950",fontSize:"0.72rem"}}>
+                  ✅ {dgiiRec.length} registros
+                </div>
+              )}
+            </div>
+
+            <div style={S.card}>
+              <div style={{fontSize:"2rem",marginBottom:"10px"}}>🚀</div>
+              <h2 style={{color:"white",margin:"0 0 6px 0",fontSize:"1.15rem"}}>2. Alegra (.xlsx)</h2>
+              <p style={{fontSize:"0.74rem",opacity:0.5,margin:"0 0 3px 0"}}>Reporte 606 exportado desde Alegra</p>
+              <p style={{fontSize:"0.69rem",color:"#f0883e",margin:"0 0 14px 0"}}>
+                Encabezado en fila 8 · datos desde fila 9
+              </p>
+              <input type="file" accept=".xlsx,.xls" onChange={handleAlegra}
+                style={{fontSize:"0.74rem",color:"#c9d1d9"}} />
+              {alegraRec && (
+                <div style={{marginTop:"9px",color:"#3fb950",fontSize:"0.72rem"}}>
+                  ✅ {alegraRec.length} registros
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Card Alegra */}
-          <div style={cardStyle}>
-            <div style={{ fontSize: "2.5rem", marginBottom: "16px" }}>🚀</div>
-            <h2 style={{ color: "white", marginBottom: "8px" }}>2. Alegra (.xlsx)</h2>
-            <p style={{ fontSize: "0.78rem", opacity: 0.6, marginBottom: "6px" }}>Reporte exportado desde Alegra.</p>
-            <p style={{ fontSize: "0.72rem", color: "#f0883e", marginBottom: "16px" }}>
-              Aporta <strong>montos</strong>, <strong>ITBIS</strong> y <strong>fechas</strong>
-            </p>
-            <input type="file" accept=".xlsx" onChange={handleAlegra} style={{ fontSize: "0.78rem", color: "#c9d1d9" }} />
-          </div>
+          {(dgiiRec||alegraRec) && (
+            <div style={{background:"#161b22",borderRadius:"12px",border:"1px solid #30363d",padding:"16px 20px"}}>
+              <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}}>
+                {dgiiRec   && <span style={S.badge("#79c0ff","#1c2d40")}>DGII: {dgiiRec.length}</span>}
+                {alegraRec && <span style={S.badge("#d2a8ff","#2d1f3d")}>Alegra: {alegraRec.length}</span>}
+                {dgiiRec&&alegraRec && <span style={S.badge("#3fb950","#12261e")}>Total: {dgiiRec.length+alegraRec.length}</span>}
+                {rncEmp  && <span style={S.badge("#58a6ff","#1c2d40")}>RNC: {rncEmp}</span>}
+                {periodo && <span style={S.badge("#58a6ff","#1c2d40")}>Período: {periodo}</span>}
+              </div>
+              <button onClick={doMerge} style={{...S.btn("#238636"),padding:"10px 26px",fontSize:"0.88rem"}}>
+                Combinar y revisar →
+              </button>
+            </div>
+          )}
         </div>
-      ) : (
-        <div style={{ background: "#161b22", borderRadius: "20px", border: "1px solid #30363d", maxWidth: "1200px", margin: "0 auto", padding: "28px" }}>
+      )}
 
-          {/* Header barra superior */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              <span style={badgeStyle}>RNC: {rnc || "—"}</span>
-              <span style={badgeStyle}>PERÍODO: {periodo || "—"}</span>
-              <span style={badgeStyle}>{editRows.length} registros</span>
-              {dgiiLoaded && <span style={{ ...badgeStyle, color: "#3fb950", background: "#12261e" }}>✅ DGII combinado</span>}
+      {/* PASO 1 */}
+      {step===1 && (
+        <div style={{background:"#161b22",borderRadius:"16px",border:"1px solid #30363d",maxWidth:"1300px",margin:"0 auto",padding:"22px"}}>
+
+          {/* Top bar */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px",flexWrap:"wrap",gap:"10px"}}>
+            <div style={{display:"flex",gap:"7px",flexWrap:"wrap",alignItems:"center"}}>
+              <span style={S.badge("#58a6ff","#1c2d40")}>RNC: {rncEmp}</span>
+              <span style={S.badge("#58a6ff","#1c2d40")}>Período: {periodo}</span>
+              <span style={S.badge("#3fb950","#12261e")}>Total: {editRows.length}</span>
+              <span style={S.badge("#79c0ff","#1c2d40")}>DGII: {nDGII}</span>
+              <span style={S.badge("#d2a8ff","#2d1f3d")}>Alegra: {nAlegra}</span>
             </div>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button onClick={() => setStep(0)}
-                style={{ background: "#30363d", color: "white", border: "none", padding: "9px 22px", borderRadius: "10px", cursor: "pointer" }}>
-                ← Atrás
-              </button>
-              <button onClick={generarExcel}
-                style={{ background: "#238636", color: "white", border: "none", padding: "9px 22px", borderRadius: "10px", cursor: "pointer", fontWeight: "bold" }}>
-                ⬇ Descargar Excel 606
-              </button>
+            <div style={{display:"flex",gap:"8px"}}>
+              <button onClick={()=>setStep(0)} style={S.btn("#30363d")}>← Atrás</button>
+              <button onClick={generarExcel}   style={S.btn("#238636")}>⬇ Descargar Excel 606</button>
             </div>
           </div>
 
-          {/* Aplicar tipo bien global */}
-          <div style={{ marginBottom: "16px", display: "flex", alignItems: "center", gap: "12px", background: "#0d1117", padding: "12px 16px", borderRadius: "10px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "0.78rem", opacity: 0.7 }}>Aplicar Tipo de Bien a <em>todas</em> las filas:</span>
-            <select value={globalTipo} onChange={e => setGlobalTipo(e.target.value)} style={{ ...selectStyle, maxWidth: "280px" }}>
+          {/* Controles */}
+          <div style={{display:"flex",gap:"14px",flexWrap:"wrap",alignItems:"center",background:"#0d1117",padding:"9px 14px",borderRadius:"9px",marginBottom:"12px"}}>
+            <span style={{fontSize:"0.74rem",opacity:0.55}}>Tipo de Bien (todas las filas):</span>
+            <select value={globalTipo} onChange={e=>setGlobalTipo(e.target.value)} style={{...S.sel,maxWidth:"260px"}}>
               <option value="">— seleccionar —</option>
-              {TIPOS_BIENES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}
+              {TIPOS_BIENES.map(t=><option key={t.code} value={t.code}>{t.label}</option>)}
             </select>
-            <button onClick={applyGlobalTipo}
-              style={{ background: "#1f6feb", color: "white", border: "none", padding: "5px 14px", borderRadius: "6px", cursor: "pointer", fontSize: "0.78rem" }}>
-              Aplicar a todos
-            </button>
-            <span style={{ fontSize: "0.72rem", opacity: 0.4 }}>o edita fila por fila ↓</span>
+            <button onClick={applyGlobalTipo} style={S.btn("#1f6feb")}>Aplicar a todas</button>
+            <div style={{marginLeft:"auto",display:"flex",gap:"6px"}}>
+              {[["all",`Todas (${editRows.length})`],["dgii",`DGII (${nDGII})`],["alegra",`Alegra (${nAlegra})`]].map(([f,label])=>(
+                <button key={f} onClick={()=>setFilter(f)}
+                  style={{...S.btn(filter===f?"#1f6feb":"#30363d"),padding:"4px 12px",fontWeight:filter===f?"bold":"normal"}}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Tabla editable */}
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.76rem" }}>
+          {/* Tabla */}
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:"0.73rem"}}>
               <thead>
-                <tr style={{ color: "#8b949e", borderBottom: "2px solid #30363d", textAlign: "left" }}>
-                  <th style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>RNC</th>
-                  <th style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>NCF</th>
-                  <th style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>Tipo Bien</th>
-                  <th style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>Fecha Comp.</th>
-                  <th style={{ padding: "10px 12px", whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
-                  <th style={{ padding: "10px 12px", whiteSpace: "nowrap", textAlign: "right" }}>ITBIS</th>
-                  <th style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>Forma de Pago</th>
-                  <th style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>Fecha Pago</th>
+                <tr style={{color:"#8b949e",borderBottom:"2px solid #30363d",textAlign:"left"}}>
+                  <th style={{padding:"8px 9px"}}>#</th>
+                  <th style={{padding:"8px 9px"}}>Fuente</th>
+                  <th style={{padding:"8px 9px"}}>RNC</th>
+                  <th style={{padding:"8px 9px"}}>NCF</th>
+                  <th style={{padding:"8px 9px",minWidth:"200px"}}>Tipo de Bienes</th>
+                  <th style={{padding:"8px 9px",whiteSpace:"nowrap"}}>F. Comp.</th>
+                  <th style={{padding:"8px 9px",textAlign:"right"}}>Total</th>
+                  <th style={{padding:"8px 9px",textAlign:"right"}}>ITBIS</th>
+                  <th style={{padding:"8px 9px",minWidth:"220px"}}>Forma de Pago</th>
+                  <th style={{padding:"8px 9px",whiteSpace:"nowrap"}}>F. Pago</th>
                 </tr>
               </thead>
               <tbody>
-                {editRows.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid #21262d", background: i % 2 === 0 ? "transparent" : "#0d111770" }}>
-                    <td style={{ padding: "8px 12px", fontFamily: "monospace", fontSize: "0.72rem", color: "#8b949e" }}>
-                      {r.rnc || "—"}
-                    </td>
-                    <td style={{ padding: "8px 12px", fontWeight: "bold", color: "white", whiteSpace: "nowrap" }}>
-                      {r.ncf}
-                    </td>
-                    <td style={{ padding: "8px 12px" }}>
-                      <select
-                        value={r.tipo}
-                        onChange={e => updateRow(i, "tipo", e.target.value)}
-                        style={selectStyle}
-                      >
-                        {TIPOS_BIENES.map(t => (
-                          <option key={t.code} value={t.code}>{t.label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td style={{ padding: "8px 12px", color: "#8b949e", whiteSpace: "nowrap" }}>
-                      {r.fechaD}/{r.fechaM}
-                    </td>
-                    <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace" }}>
-                      {r.total}
-                    </td>
-                    <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace", color: "#58a6ff" }}>
-                      {r.itbis}
-                    </td>
-                    <td style={{ padding: "8px 12px" }}>
-                      <select
-                        value={r.fpCode}
-                        onChange={e => updateRow(i, "fpCode", e.target.value)}
-                        style={selectStyle}
-                      >
-                        {FORMAS_PAGO.map(f => (
-                          <option key={f.code} value={f.code}>{f.label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td style={{ padding: "8px 12px", color: "#3fb950", whiteSpace: "nowrap", fontFamily: "monospace" }}>
-                      {r.pagD && r.pagM ? `${r.pagD}/${r.pagM}` : "—"}
-                    </td>
-                  </tr>
-                ))}
+                {vis.map((r, vi) => {
+                  const i = editRows.indexOf(r);
+                  const isDGII = r.source==="DGII";
+                  return (
+                    <tr key={i} style={{borderBottom:"1px solid #21262d",background:vi%2===0?"transparent":"#0d111760"}}>
+                      <td style={{padding:"6px 9px",color:"#8b949e"}}>{i+1}</td>
+                      <td style={{padding:"6px 9px"}}>
+                        <span style={{
+                          fontSize:"0.67rem",fontWeight:"bold",padding:"2px 7px",borderRadius:"10px",
+                          background:isDGII?"#1c2d40":"#2d1f3d",color:isDGII?"#79c0ff":"#d2a8ff"
+                        }}>{r.source}</span>
+                      </td>
+                      <td style={{padding:"6px 9px",fontFamily:"monospace",fontSize:"0.70rem",color:"#8b949e"}}>{r.rnc}</td>
+                      <td style={{padding:"6px 9px",fontWeight:"bold",color:"white",whiteSpace:"nowrap",fontSize:"0.72rem"}}>{r.ncf}</td>
+                      <td style={{padding:"6px 9px"}}>
+                        <select value={r.tipo} onChange={e=>updateRow(i,"tipo",e.target.value)} style={{...S.sel,width:"100%"}}>
+                          {TIPOS_BIENES.map(t=><option key={t.code} value={t.code}>{t.label}</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding:"6px 9px",color:"#8b949e",whiteSpace:"nowrap",fontFamily:"monospace",fontSize:"0.70rem"}}>
+                        {r.fechaD}/{r.fechaM}
+                      </td>
+                      <td style={{padding:"6px 9px",textAlign:"right",fontFamily:"monospace"}}>{r.total}</td>
+                      <td style={{padding:"6px 9px",textAlign:"right",fontFamily:"monospace",color:"#58a6ff"}}>{r.itbis}</td>
+                      <td style={{padding:"6px 9px"}}>
+                        <select value={r.fpCode} onChange={e=>updateRow(i,"fpCode",e.target.value)} style={{...S.sel,width:"100%"}}>
+                          {FORMAS_PAGO.map(f=><option key={f.code} value={f.code}>{f.label}</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding:"6px 9px",fontFamily:"monospace",fontSize:"0.70rem",color:"#3fb950",whiteSpace:"nowrap"}}>
+                        {r.pagM ? `${r.pagD}/${r.pagM}` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+
+          <div style={{marginTop:"12px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+            <span style={{fontSize:"0.72rem",opacity:0.4}}>
+              Mostrando {vis.length} de {editRows.length} registros
+            </span>
+            <button onClick={generarExcel} style={{...S.btn("#238636"),padding:"9px 22px"}}>
+              ⬇ Descargar Excel 606 ({editRows.length} registros)
+            </button>
           </div>
         </div>
       )}
 
-      <footer style={{ textAlign: "center", marginTop: "40px", opacity: 0.3, fontSize: "0.75rem" }}>
+      <footer style={{textAlign:"center",marginTop:"32px",opacity:0.2,fontSize:"0.71rem"}}>
         606 Merger Pro · Transporte Amalfi
       </footer>
     </div>
