@@ -245,12 +245,18 @@ function App() {
     if (!dgiiRec && !alegraRec) { alert("Carga al menos un archivo."); return; }
     const combined = [...(dgiiRec||[]), ...(alegraRec||[])].map(r => {
       const row = { ...r };
-      // Facturas a crédito (04): siempre calcular fecha pago = +30 días
+      // Facturas a crédito (04): calcular fecha pago +30 días
       if (row.fpCode === "04") {
         const { pagM, pagD } = calcPago(row.fechaM, row.fechaD, "04");
         row.pagM = pagM;
         row.pagD = pagD;
       }
+      // Total = servicios + bienes (siempre recalculado)
+      const svc  = parseFloat(row.montoSvc)  || 0;
+      const bien = parseFloat(row.montoBien) || 0;
+      row.total = (svc + bien).toFixed(2);
+      // ITBIS llevado al costo = ITBIS facturado
+      row.itbisCosto = row.itbis;
       return row;
     });
 
@@ -305,22 +311,25 @@ function App() {
       "Forma de Pago",
     ];
 
+    // Convierte string a número real para Excel; celdas vacías quedan como ""
+    const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
+
     const data = editRows.map((r,i) => [
       i+1, r.rnc, r.tipoId||"1",
       tipoLabel(r.tipo),               // texto completo
       r.ncf, r.ncfMod||"",
       r.fechaM, r.fechaD,
       r.pagM||"", r.pagD||"",
-      r.montoSvc, r.montoBien, r.total,
-      r.itbis, r.itbisRet, r.itbisProp,
-      r.itbisCosto, r.itbisAdel, r.itbisPerc,
+      n(r.montoSvc), n(r.montoBien), n(r.total),
+      n(r.itbis), n(r.itbisRet), n(r.itbisProp),
+      n(r.itbisCosto), n(r.itbisAdel), n(r.itbisPerc),
       isrLabel(r.tipoISR),             // texto completo
-      r.montoRet, r.isrPerc, r.isc, r.otros, r.propina,
+      n(r.montoRet), n(r.isrPerc), n(r.isc), n(r.otros), n(r.propina),
       fpLabel(r.fpCode),               // texto completo
     ]);
 
     // Encabezado igual al formato DGII
-    const totalMonto = editRows.reduce((s,r) => s + parseFloat(r.total||0), 0).toFixed(2);
+    const totalMonto = editRows.reduce((s,r) => s + (parseFloat(r.montoSvc)||0) + (parseFloat(r.montoBien)||0), 0).toFixed(2);
     const headerRows = [
       [],
       ["", "", "", "", "Formato de Envío de Compras de Bienes y Servicios"],
