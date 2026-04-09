@@ -15,27 +15,40 @@
 const { useState } = React;
 
 const TIPOS_BIENES = [
-  { code:"01", label:"01 - GASTOS DE PERSONAL" },
-  { code:"02", label:"02 - GASTOS POR TRABAJOS, SUMINISTROS Y SERVICIOS" },
-  { code:"03", label:"03 - ARRENDAMIENTOS" },
-  { code:"04", label:"04 - GASTOS DE ACTIVOS FIJOS" },
-  { code:"05", label:"05 - GASTOS DE REPRESENTACIÓN" },
-  { code:"06", label:"06 - OTRAS DEDUCCIONES ADMITIDAS" },
-  { code:"07", label:"07 - GASTOS FINANCIEROS" },
-  { code:"08", label:"08 - GASTOS EXTRAORDINARIOS" },
-  { code:"09", label:"09 - COMPRAS Y GASTOS QUE FORMAN PARTE DEL COSTO DE VENTA" },
-  { code:"10", label:"10 - ADQUISICIONES DE ACTIVOS" },
-  { code:"11", label:"11 - GASTOS DE SEGUROS" },
+  { code:"01", label:"01- GASTOS DE PERSONAL" },
+  { code:"02", label:"02-GASTOS POR TRABAJOS, SUMINISTROS Y SERVICIOS" },
+  { code:"03", label:"03-ARRENDAMIENTOS" },
+  { code:"04", label:"04- GASTOS DE ACTIVOS FIJOS" },
+  { code:"05", label:"05 -GASTOS DE REPRESENTACIÓN" },
+  { code:"06", label:"06-OTRAS DEDUCCIONES ADMITIDAS" },
+  { code:"07", label:"07 -GASTOS FINANCIEROS" },
+  { code:"08", label:"08 -GASTOS EXTRAORDINARIOS" },
+  { code:"09", label:"09 -COMPRAS Y GASTOS QUE FORMAN PARTE DEL COSTO DE VENTA" },
+  { code:"10", label:"10 -ADQUISICIONES DE ACTIVOS" },
+  { code:"11", label:"11- GASTOS DE SEGUROS" },
 ];
 
 const FORMAS_PAGO = [
   { code:"01", label:"01 - EFECTIVO" },
-  { code:"02", label:"02 - CHEQUES / TRANSFERENCIAS / DEPÓSITO" },
-  { code:"03", label:"03 - TARJETA CRÉDITO / DÉBITO" },
-  { code:"04", label:"04 - COMPRA A CRÉDITO" },
-  { code:"05", label:"05 - PERMUTA" },
-  { code:"06", label:"06 - NOTAS DE CRÉDITO" },
+  { code:"02", label:"02 - CHEQUES/TRANSFERENCIAS/DEPÓSITO" },
+  { code:"03", label:"03 - TARJETA CRÉDITO/DÉBITO" },
+  { code:"04", label:"04 - COMPRA A CREDITO" },
+  { code:"05", label:"05 -  PERMUTA" },
+  { code:"06", label:"06 - NOTA DE CREDITO" },
   { code:"07", label:"07 - MIXTO" },
+];
+
+const TIPOS_ISR = [
+  { code:"",   label:"" },
+  { code:"01", label:"01 - ALQUILERES" },
+  { code:"02", label:"02 - HONORARIOS POR SERVICIOS" },
+  { code:"03", label:"03 - OTRAS RENTAS" },
+  { code:"04", label:"04 - OTRAS RENTAS (Rentas Presuntas)" },
+  { code:"05", label:"05 - INTERESES PAGADOS A PERSONAS FÍSICAS" },
+  { code:"06", label:"06 - INTERESES PAGADOS A ENTIDADES EXENTAS" },
+  { code:"07", label:"07 - RETENCIÓN POR PROVEEDORES DEL ESTADO" },
+  { code:"08", label:"08 - JUEGOS TELEFONICOS" },
+  { code:"09", label:"09 - RETENCIONES SUBSECTOR AGROPECUARIO" },
 ];
 
 // ── Utilidades ──────────────────────────────────────────────────
@@ -270,7 +283,16 @@ function App() {
   };
 
   const generarExcel = () => {
-    const headers = [
+    // Helpers para obtener etiqueta completa
+    const tipoLabel = (code) => TIPOS_BIENES.find(t => t.code === code)?.label || code;
+    const fpLabel   = (code) => FORMAS_PAGO.find(f => f.code === code)?.label || code;
+    const isrLabel  = (val)  => {
+      if (!val) return "";
+      const found = TIPOS_ISR.find(t => t.label === val || t.code === val.split(" - ")[0]?.trim());
+      return found ? found.label : val;
+    };
+
+    const colHeaders = [
       "Número Línea","RNC o Cédula del Proveedor","Tipo de Identificación",
       "Tipo de Bienes y Servicios Adquiridos","Número Comprobante Fiscal",
       "NCF ó Documento Modificado","Fecha Comprobante (AAAAMM)","Fecha Comprobante (DD)",
@@ -282,21 +304,43 @@ function App() {
       "Impuesto Selectivo al Consumo","Otros Impuesto/Tasas","Monto Propina Legal",
       "Forma de Pago",
     ];
+
     const data = editRows.map((r,i) => [
-      i+1, r.rnc, r.tipoId||"1", r.tipo, r.ncf, r.ncfMod||"",
-      r.fechaM, r.fechaD, r.pagM||"", r.pagD||"",
-      r.montoSvc, r.montoBien, r.total, r.itbis, r.itbisRet,
-      r.itbisProp, r.itbisCosto, r.itbisAdel, r.itbisPerc,
-      r.tipoISR||"", r.montoRet, r.isrPerc, r.isc, r.otros, r.propina,
-      r.fpCode,
+      i+1, r.rnc, r.tipoId||"1",
+      tipoLabel(r.tipo),               // texto completo
+      r.ncf, r.ncfMod||"",
+      r.fechaM, r.fechaD,
+      r.pagM||"", r.pagD||"",
+      r.montoSvc, r.montoBien, r.total,
+      r.itbis, r.itbisRet, r.itbisProp,
+      r.itbisCosto, r.itbisAdel, r.itbisPerc,
+      isrLabel(r.tipoISR),             // texto completo
+      r.montoRet, r.isrPerc, r.isc, r.otros, r.propina,
+      fpLabel(r.fpCode),               // texto completo
     ]);
-    const ws = XLSX.utils.aoa_to_sheet([headers,...data]);
+
+    // Encabezado igual al formato DGII
+    const totalMonto = editRows.reduce((s,r) => s + parseFloat(r.total||0), 0).toFixed(2);
+    const headerRows = [
+      [],
+      ["", "", "", "", "Formato de Envío de Compras de Bienes y Servicios"],
+      ["RNC o Cédula", "", rncEmp],
+      ["Periodo",      "", periodo],
+      ["Cantidad Registros", "", editRows.length],
+      ["Total Monto Facturado", "", totalMonto],
+      [],
+      [],
+      colHeaders,
+      ...data,
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(headerRows);
     ws["!cols"] = [
-      {wch:7},{wch:14},{wch:5},{wch:6},{wch:20},{wch:20},
+      {wch:7},{wch:14},{wch:5},{wch:45},{wch:20},{wch:20},
       {wch:10},{wch:5},{wch:10},{wch:5},
       {wch:14},{wch:14},{wch:16},{wch:14},{wch:12},{wch:16},
-      {wch:14},{wch:14},{wch:16},{wch:12},{wch:14},{wch:14},
-      {wch:16},{wch:14},{wch:14},{wch:5},
+      {wch:14},{wch:14},{wch:16},{wch:30},{wch:14},{wch:14},
+      {wch:16},{wch:14},{wch:14},{wch:30},
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "606");
@@ -428,6 +472,7 @@ function App() {
                   <th style={{padding:"8px 9px",textAlign:"right"}}>Total</th>
                   <th style={{padding:"8px 9px",textAlign:"right"}}>ITBIS</th>
                   <th style={{padding:"8px 9px",minWidth:"220px"}}>Forma de Pago</th>
+                  <th style={{padding:"8px 9px",minWidth:"200px"}}>Retención ISR</th>
                   <th style={{padding:"8px 9px",whiteSpace:"nowrap"}}>F. Pago</th>
                 </tr>
               </thead>
@@ -459,6 +504,11 @@ function App() {
                       <td style={{padding:"6px 9px"}}>
                         <select value={r.fpCode} onChange={e=>updateRow(i,"fpCode",e.target.value)} style={{...S.sel,width:"100%"}}>
                           {FORMAS_PAGO.map(f=><option key={f.code} value={f.code}>{f.label}</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding:"6px 9px"}}>
+                        <select value={r.tipoISR||""} onChange={e=>updateRow(i,"tipoISR",e.target.value)} style={{...S.sel,width:"100%"}}>
+                          {TIPOS_ISR.map(t=><option key={t.code} value={t.label}>{t.label}</option>)}
                         </select>
                       </td>
                       <td style={{padding:"6px 9px",fontFamily:"monospace",fontSize:"0.70rem",color:"#3fb950",whiteSpace:"nowrap"}}>
